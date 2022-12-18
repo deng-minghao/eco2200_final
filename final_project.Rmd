@@ -1,0 +1,137 @@
+---
+title: "Final Project"
+output: html_document
+date: "2022-12-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##### Minghao Deng
+
+```{r}
+file <- 'C:/Users/danie/Downloads/Final_Project.csv'
+my_data <- read.csv(file)
+#Validating data loading
+head(my_data)
+```
+```{r}
+#Checking Summary
+summary(my_data)
+```
+```{r}
+xtabs(~Householder.s.Sex+Householder.s.Race,my_data)
+```
+```{r}
+dat_use <- my_data[my_data$Householder.s.Age >= 18 & my_data$Householder.s.Age <= 65, ]
+#Rearranging borough
+manhattan <- dat_use$Borough == 3
+queens <- dat_use$Borough == 4
+si <- dat_use$Borough == 5
+dat_use$Borough[queens] <- 3
+dat_use$Borough[si] <- 4
+dat_use$Borough[manhattan] <- 5
+summary(dat_use$Borough)
+```
+```{r}
+#Adjusting income
+average_income <- dat_use$Total.Household.Income == 9999999 | dat_use$Total.Household.Income <0
+dat_use$adjusted_household_income <- dat_use$Total.Household.Income
+dat_use$adjusted_household_income[average_income] <- 60000 #As indicated in summary
+summary(dat_use$adjusted_household_income)
+```
+```{r}
+#Adjust Value
+renting <- dat_use$Value == 9999999
+no_report <- dat_use$Value == 9999998
+dat_use$Value[renting] = 1
+dat_use$Value[no_report] = mean(dat_use$Value[!no_report])
+summary(dat_use$Value)
+```
+
+```{r}
+#Adjusting living cost
+mortgage_free <- dat_use$Mortgage.Status == 2
+for (each in length(mortgage_free)){
+  if (mortgage_free[each]){dat_use$Monthly.Owner.Cost[each]=dat_use$Monthly.Owner.Cost[each]+dat_use$Value[each]*0.8/360}
+}
+
+monthly_owner <- dat_use$Monthly.Owner.Cost >= 999998
+dat_use$Monthly.Owner.Cost[monthly_owner] = 1 #renter-occupied or living rent-free mean 0 cost to owner, since this isn't living cost
+monthly_renter <- dat_use$Monthly.Gross.Rent == 99999
+dat_use$Monthly.Gross.Rent[monthly_renter] = 1 #owner-occupied or rent-free
+dat_use$housing_cost <- dat_use$Monthly.Owner.Cost+dat_use$Monthly.Gross.Rent
+dat_use$housing_cost[dat_use$housing_cost == 0] = 1
+summary(dat_use$housing_cost)
+```
+As indicated previously, the ratio is created
+```{r}
+dat_use$housing_ratio <- dat_use$adjusted_household_income/(12*dat_use$housing_cost)
+summary(dat_use$housing_ratio)
+tail(sort(dat_use$housing_ratio),100)
+```
+As we can see, the data is significantly skewed, and this is because of people who have 0 living cost. After carefully examining data, there are about 200 lines of data above 1000. Everything above 1000 will be replaced with median value.
+```{r}
+x <- dat_use$housing_ratio >= 1000
+dat_use$housing_ratio[x] = 3.24 
+summary(dat_use$housing_ratio)
+```
+Now to construct a linear regression:
+```{r}
+attach(dat_use)
+```
+```{r}
+lm_model <- lm(housing_ratio~Borough+Householder.s.Age+Householder.s.Sex+Householder.s.Race+Condo.Coop.Status+Number.of.Stories.in.Building+Number.of.Units.in.Building+Number.of.Bedrooms+Number.of.Rooms+Complete.Kitchen.Facilities+Complete.Plumbing.Facilities+Type.of.Heating.Fuel+Control.Status)
+```
+```{r}
+summary(lm_model)
+```
+
+```{r}
+identifier <- Control.Status %in% c(30,31,85,86,90)
+regulated_housing <- dat_use[identifier,]
+free_housing <- dat_use[!identifier,]
+detach(dat_use)
+attach(free_housing)
+```
+```{r}
+lm_free <- lm(housing_cost~Borough+Householder.s.Age+Householder.s.Sex+Condo.Coop.Status+Number.of.Stories.in.Building+Number.of.Units.in.Building+Number.of.Bedrooms+Number.of.Rooms+Complete.Kitchen.Facilities+Complete.Plumbing.Facilities+Type.of.Heating.Fuel)
+detach(free_housing)
+attach(regulated_housing)
+lm_regulated <- lm(housing_cost~Borough+Householder.s.Age+Householder.s.Sex+Condo.Coop.Status+Number.of.Stories.in.Building+Number.of.Units.in.Building+Number.of.Bedrooms+Number.of.Rooms+Complete.Kitchen.Facilities+Complete.Plumbing.Facilities+Type.of.Heating.Fuel)
+summary(lm_free)
+summary(lm_regulated)
+```
+
+```{r}
+detach(regulated_housing)
+attach(free_housing)
+```
+```{r}
+lm_model <- lm(housing_cost~Borough+Householder.s.Age+I(Householder.s.Age**2)+Number.of.Stories.in.Building+Number.of.Units.in.Building+Number.of.Rooms+Type.of.Heating.Fuel+Control.Status)
+summary(lm_model)
+```
+```{r}
+library(car)
+linearHypothesis(lm_model, c("Householder.s.Age =0",'I(Householder.s.Age^2)'))
+```
+
+Assuming now that rent controlled model came into the market as brand new units with a rent matching their specs based on the actual housing cost:
+```{r}
+prediction <- predict(lm_model,regulated_housing)
+summary(prediction)
+x <- as.numeric(prediction)
+nyc_without_rent_control <- c(x,as.numeric(housing_cost))
+sd(nyc_without_rent_control)
+summary(nyc_without_rent_control)
+```
+
+<p><br>Hypothesis: There's a difference in housing cost with rent-regulation.</br>
+<br>$H_0:\ \mu_0=\mu_1$, $H_1: \mu_0 \ne \mu_1$</br>
+<br>Confidence interval is constructed at </br></p>
+
+```{r}
+nyc_with_rent_control <- as.numeric(dat_use$housing_cost)
+t.test(nyc_with_rent_control,nyc_without_rent_control)
+```
